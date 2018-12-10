@@ -20,7 +20,7 @@
                                    | opened
                                    | contract_created,
                 test_start_time = not_set :: not_set | non_neg_integer(),
-                calls_left = 1000 :: non_neg_integer()
+                calls_left = 100000 :: non_neg_integer()
                }).
 
 
@@ -247,7 +247,7 @@ next_state(#{type := report, tag := update, info := SignedTx},
         {channel_create_tx, _} ->
             State
     end;
-next_state(#{type := report, tag := update, info := SignedTx},
+next_state(#{type := report, tag := update, info := _SignedTx},
             #state{role=Role, status=contract_created,
                    calls_left=Left} = State) ->
 
@@ -260,6 +260,12 @@ next_state(#{type := report, tag := update, info := SignedTx},
             pass
             %log_("is waiting for other participant to call",
             %    "a contract", Role)
+    end,
+    UpdatedLeft = Left - 1,
+    case UpdatedLeft rem 200 =:= 0 of
+        true ->
+            log_("has " ++ integer_to_list(UpdatedLeft), "contract calls remaining", Role);
+        false -> pass
     end,
     State#state{calls_left = Left - 1};
 next_state(_, State) -> State.
@@ -284,11 +290,13 @@ create_transfer(#state{fsm = Fsm, role = Role}) ->
                                1),
     ok.
 
-create_contract(#state{fsm = Fsm, role = Role}) ->
-    log_("is creating", "a contract", Role),
+create_contract(#state{fsm = Fsm, role = Role,
+                     calls_left = Left}) ->
+    %log_("is !!!!!!!!!!!!!!!!!! creating", "a contract", Role),
     TestName = "counter",
     BinCode = compile_contract(TestName),
     CallData = make_calldata_from_code(BinCode, init, {42}), 
+    log_("is CREATING contract", integer_to_list(Left), Role),
     ok = aesc_fsm:upd_create_contract(Fsm,
                                       #{vm_version => ?AEVM_01_Sophia_01,
                                         deposit    => 5,
