@@ -38,6 +38,8 @@
         , peek/2
         , push/1
         , push/2
+        , push_txhash/1
+        , push_txhash/2
         , size/0
         , top_change/3
         , dbs/0
@@ -125,7 +127,24 @@ stop() ->
 -define(PUSH_EVENT(E), Event =:= tx_created; Event =:= tx_received).
 
 %% INFO: Transaction from the same sender with the same nonce and fee
-%%       will be overwritten
+%
+-spec push_txhash(aetx_sign:signed_tx()) -> {ok, atom()} | {error, atom()}.
+push_txhash(Tx) ->
+    push_txhash(Tx, tx_created).
+
+-spec push_txhash(aetx_sign:signed_tx(), event()) -> {ok, atom()} | {error, atom()}.
+push_txhash(Tx, Event = tx_received) ->
+    TxHash = safe_tx_hash(Tx),
+    case aec_tx_gossip_cache:in_cache(TxHash) of
+        true -> {ok, Txhash};
+        false ->
+            aec_jobs_queues:run(tx_pool_push, fun() -> push_txhash_(Tx, TxHash, Event) end)
+    end;
+
+push_txhash(Tx, Event = tx_created) ->
+    push_txhash_(Tx, safe_tx_hash(Tx), Event).
+
+%       will be overwritten
 -spec push(aetx_sign:signed_tx()) -> ok | {error, atom()}.
 push(Tx) ->
     push(Tx, tx_created).
@@ -160,6 +179,20 @@ push_(Tx, TxHash, Event) ->
             incr([push]),
             gen_server:call(?SERVER, {push, Tx, TxHash, Event})
     end.
+
+push_txhash_(Tx, TxHash, Event) ->
+    case check_pool_db_put(Tx, TxHash, Event) of
+        ignore ->
+            incr([push, ignore]),
+            {ok, Txhash};
+        {error,_} = E ->
+            incr([push, error]),
+            E;
+        ok ->
+            incr([push]),
+            gen_server:call(?SERVER, {push, Tx, TxHash, Event})
+    end.
+
 
 incr(Metric) ->
     aec_metrics:try_update([ae,epoch,aecore,tx_pool | Metric], 1).
